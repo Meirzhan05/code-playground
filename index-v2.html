@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Code Playground v2</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css">
+<style>
+  :root { --bg: #1e1e2e; --surface: #181825; --surface2: #313244; --text: #cdd6f4; --subtext: #6c7086; --mauve: #cba6f7; --green: #a6e3a1; --red: #f38ba8; --peach: #fab387; --blue: #89b4fa; --yellow: #f9e2af; --border: #313244; --radius: 6px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  
+  /* Header */
+  header { background: var(--surface); padding: 8px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+  header h1 { font-size: 16px; font-weight: 600; color: var(--mauve); }
+  header .sub { font-size: 11px; color: var(--subtext); }
+  .spacer { flex: 1; }
+  .btn { background: var(--surface2); border: none; color: var(--text); padding: 5px 12px; border-radius: var(--radius); cursor: pointer; font-size: 12px; transition: 0.15s; white-space: nowrap; }
+  .btn:hover { background: #45475a; }
+  .btn.primary { background: var(--mauve); color: #1e1e2e; font-weight: 600; }
+  .btn.primary:hover { background: #b4befe; }
+  .btn.danger { background: var(--red); color: #1e1e2e; }
+  .btn.danger:hover { background: #eba0ac; }
+  .btn.small { padding: 3px 8px; font-size: 11px; }
+  .btn.active { background: var(--mauve); color: #1e1e2e; }
+
+  /* Main layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  
+  /* Editor panel */
+  .editor-panel { flex: 1; display: flex; flex-direction: column; min-width: 200px; }
+  .editor-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+  .editor-tab { padding: 6px 14px; font-size: 11px; cursor: pointer; border-right: 1px solid var(--border); color: var(--subtext); transition: 0.15s; white-space: nowrap; user-select: none; }
+  .editor-tab.active { background: var(--bg); color: var(--text); border-bottom: 2px solid var(--mauve); }
+  .editor-tab:hover:not(.active) { color: var(--text); }
+  
+  .editor-container { flex: 1; position: relative; overflow: hidden; }
+  .editor-container .CodeMirror { height: 100% !important; }
+  
+  /* Divider */
+  .divider { width: 5px; background: var(--border); cursor: col-resize; flex-shrink: 0; position: relative; z-index: 10; }
+  .divider:hover { background: var(--subtext); }
+  .divider.h-divider { width: auto; height: 5px; cursor: row-resize; }
+
+  /* Preview panel */
+  .preview-panel { flex: 1; display: flex; flex-direction: column; min-width: 200px; }
+  .preview-header { background: var(--surface); padding: 6px 14px; font-size: 11px; color: var(--subtext); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .preview-header .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .preview-frame { flex: 1; background: white; }
+  .preview-frame iframe { width: 100%; height: 100%; border: none; }
+
+  /* Console panel */
+  .console-panel { background: #11111b; border-top: 1px solid var(--border); display: none; flex-direction: column; min-height: 80px; max-height: 200px; flex-shrink: 0; }
+  .console-panel.open { display: flex; }
+  .console-header { background: var(--surface); padding: 4px 12px; font-size: 11px; color: var(--subtext); display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .console-header .clear-btn { margin-left: auto; cursor: pointer; color: var(--subtext); font-size: 11px; }
+  .console-header .clear-btn:hover { color: var(--red); }
+  .console-output { flex: 1; overflow-y: auto; padding: 6px 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.5; }
+  .console-output .log { color: #cdd6f4; }
+  .console-output .warn { color: var(--yellow); }
+  .console-output .error { color: var(--red); }
+  .console-output .info { color: var(--blue); }
+
+  /* Status bar */
+  .status-bar { background: var(--surface); padding: 4px 14px; font-size: 11px; color: var(--subtext); border-top: 1px solid var(--border); display: flex; gap: 14px; flex-shrink: 0; align-items: center; }
+  .status-bar .error { color: var(--red); }
+  .status-bar .ok { color: var(--green); }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); background: var(--surface2); color: var(--text); padding: 8px 18px; border-radius: var(--radius); font-size: 12px; opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 1000; }
+
+  /* Snippet library modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 999; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; max-width: 500px; width: 90%; max-height: 70vh; overflow-y: auto; }
+  .modal h2 { font-size: 16px; margin-bottom: 12px; color: var(--mauve); }
+  .modal .snippet-item { padding: 10px 12px; background: var(--bg); border-radius: var(--radius); margin-bottom: 8px; cursor: pointer; transition: 0.15s; }
+  .modal .snippet-item:hover { background: var(--surface2); }
+  .modal .snippet-item h3 { font-size: 13px; margin-bottom: 4px; }
+  .modal .snippet-item p { font-size: 11px; color: var(--subtext); }
+  .modal .close-btn { float: right; background: none; border: none; color: var(--subtext); font-size: 18px; cursor: pointer; }
+  .modal .close-btn:hover { color: var(--text); }
+
+  /* Project selector */
+  .project-select { background: var(--surface2); color: var(--text); border: none; border-radius: var(--radius); padding: 4px 8px; font-size: 12px; cursor: pointer; outline: none; max-width: 140px; }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    .main { flex-direction: column; }
+    .divider { width: auto; height: 5px; cursor: row-resize; }
+    .editor-panel, .preview-panel { min-height: 200px; }
+    header { padding: 6px 10px; gap: 6px; }
+    header h1 { font-size: 14px; }
+    .btn { padding: 4px 8px; font-size: 11px; }
+    .modal { width: 95%; max-height: 80vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>✦ Code Playground</h1>
+  <span class="sub">v2</span>
+  <select class="project-select" id="projectSelect" onchange="switchProject(this.value)">
+    <option value="__default">Default Project</option>
+  </select>
+  <div class="spacer"></div>
+  <button class="btn small" onclick="newProject()">+ New</button>
+  <button class="btn" onclick="runCode()" title="Cmd+Enter">▶ Run</button>
+  <button class="btn" onclick="toggleConsole()" id="consoleToggle">⎚ Console</button>
+  <button class="btn" onclick="openSnippets()">📋 Snippets</button>
+  <button class="btn" onclick="formatCode()">↯ Format</button>
+  <button class="btn" onclick="undoCode()" title="Cmd+Z">↩ Undo</button>
+  <button class="btn danger" onclick="clearAll()">✕ Clear</button>
+  <button class="btn primary" onclick="exportCode()">↓ Export</button>
+</header>
+
+<div class="main">
+  <div class="editor-panel" id="editorPanel">
+    <div class="editor-tabs">
+      <div class="editor-tab active" data-tab="html" onclick="switchTab('html')">HTML</div>
+      <div class="editor-tab" data-tab="css" onclick="switchTab('css')">CSS</div>
+      <div class="editor-tab" data-tab="js" onclick="switchTab('js')">JS</div>
+    </div>
+    <div class="editor-container">
+      <textarea id="htmlEditor"><!-- HTML here --></textarea>
+      <textarea id="cssEditor" style="display:none">/* CSS here */</textarea>
+      <textarea id="jsEditor" style="display:none">// JavaScript here</textarea>
+    </div>
+  </div>
+  <div class="divider" id="divider"></div>
+  <div class="right-panel" style="flex:1;display:flex;flex-direction:column;min-width:200px;">
+    <div class="preview-panel" style="flex:1;">
+      <div class="preview-header"><span class="dot"></span> Live Preview</div>
+      <div class="preview-frame"><iframe id="preview" sandbox="allow-scripts allow-modals allow-same-origin"></iframe></div>
+    </div>
+    <div class="console-panel" id="consolePanel">
+      <div class="console-header">
+        ⎚ Console
+        <span class="clear-btn" onclick="clearConsole()">Clear</span>
+      </div>
+      <div class="console-output" id="consoleOutput"></div>
+    </div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="statusLeft">Ready</span>
+  <span id="cursorPos">Ln 1, Col 1</span>
+  <span class="spacer"></span>
+  <span id="statusRight">Auto-run: ON</span>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- Snippet Library Modal -->
+<div class="modal-overlay" id="snippetModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeSnippets()">✕</button>
+    <h2>📋 Snippet Library</h2>
+    <div id="snippetList"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/edit/matchbrackets.min.js"></script>
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let currentTab = 'html';
+let autoRun = true;
+let runTimer = null;
+let consoleOpen = false;
+let undoStack = { html: [], css: [], js: [] };
+let maxUndo = 30;
+let currentProject = '__default';
+let projects = {};
+
+// Load projects from localStorage
+function loadProjects() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('cpProjects'));
+    if (saved) projects = saved;
+  } catch(e) {}
+  if (!projects.__default) {
+    projects.__default = { name: 'Default Project', html: '', css: '', js: '' };
+  }
+}
+function saveProjects() {
+  try { localStorage.setItem('cpProjects', JSON.stringify(projects)); } catch(e) {}
+}
+
+// ============================================================
+// CODE MIRROR SETUP
+// ============================================================
+const editors = {};
+const textareas = {
+  html: document.getElementById('htmlEditor'),
+  css: document.getElementById('cssEditor'),
+  js: document.getElementById('jsEditor')
+};
+
+function createEditor(id, mode, ta) {
+  const editor = CodeMirror.fromTextArea(ta, {
+    mode: mode,
+    theme: 'dracula',
+    lineNumbers: true,
+    indentUnit: 2,
+    tabSize: 2,
+    lineWrapping: false,
+    autoCloseBrackets: true,
+    matchBrackets: true,
+    extraKeys: {
+      'Cmd-Enter': () => runCode(),
+      'Ctrl-Enter': () => runCode(),
+      'Cmd-S': () => { saveCurrentProject(); showToast('Saved ✓'); },
+      'Ctrl-S': () => { saveCurrentProject(); showToast('Saved ✓'); },
+      'Cmd-Z': () => undoCode(),
+      'Ctrl-Z': () => undoCode(),
+      'Cmd-1': () => switchTab('html'),
+      'Ctrl-1': () => switchTab('html'),
+      'Cmd-2': () => switchTab('css'),
+      'Ctrl-2': () => switchTab('css'),
+      'Cmd-3': () => switchTab('js'),
+      'Ctrl-3': () => switchTab('js'),
+    }
+  });
+  
+  editor.on('change', () => {
+    // Push to undo stack
+    const val = editor.getValue();
+    const stack = undoStack[id];
+    if (stack.length === 0 || stack[stack.length-1] !== val) {
+      stack.push(val);
+      if (stack.length > maxUndo) stack.shift();
+    }
+    onCodeChange();
+  });
+  
+  editor.on('cursorActivity', () => {
+    const cursor = editor.getCursor();
+    document.getElementById('cursorPos').textContent = `Ln ${cursor.line+1}, Col ${cursor.ch+1}`;
+  });
+  
+  return editor;
+}
+
+// ============================================================
+// INIT
+// ============================================================
+loadProjects();
+
+editors.html = createEditor('html', 'xml', textareas.html);
+editors.css = createEditor('css', 'css', textareas.css);
+editors.js = createEditor('js', 'javascript', textareas.js);
+
+// Load current project
+function loadProject(name) {
+  const p = projects[name];
+  if (!p) return;
+  currentProject = name;
+  editors.html.setValue(p.html || '');
+  editors.css.setValue(p.css || '');
+  editors.js.setValue(p.js || '');
+  document.getElementById('projectSelect').value = name;
+  updateProjectSelect();
+}
+
+function saveCurrentProject() {
+  if (!projects[currentProject]) {
+    projects[currentProject] = { name: currentProject, html: '', css: '', js: '' };
+  }
+  projects[currentProject].html = editors.html.getValue();
+  projects[currentProject].css = editors.css.getValue();
+  projects[currentProject].js = editors.js.getValue();
+  saveProjects();
+}
+
+function switchProject(name) {
+  saveCurrentProject();
+  loadProject(name);
+  runCode();
+}
+
+function updateProjectSelect() {
+  const sel = document.getElementById('projectSelect');
+  const current = sel.value;
+  sel.innerHTML = '';
+  Object.keys(projects).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = projects[key].name || key;
+    sel.appendChild(opt);
+  });
+  sel.value = current;
+}
+
+// New project
+function newProject() {
+  const name = prompt('Project name:');
+  if (!name || name === '__default') return;
+  if (projects[name]) { showToast('Project exists'); return; }
+  projects[name] = { name, html: '', css: '', js: '' };
+  saveProjects();
+  loadProject(name);
+  showToast('Created: ' + name);
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.editor-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  Object.entries(editors).forEach(([key, ed]) => {
+    ed.getWrapperElement().style.display = key === tab ? '' : 'none';
+  });
+  editors[tab].focus();
+}
+
+// ============================================================
+// RUN CODE (with console capture)
+// ============================================================
+function runCode() {
+  const html = editors.html.getValue();
+  const css = editors.css.getValue();
+  const js = editors.js.getValue();
+
+  const doc = preview.contentDocument || preview.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>${css}</style>
+    </head>
+    <body>
+      ${html}
+      <script>
+        // Console capture
+        (function() {
+          const logs = [];
+          const origLog = console.log;
+          const origWarn = console.warn;
+          const origError = console.error;
+          const origInfo = console.info;
+          
+          console.log = function() {
+            const msg = Array.from(arguments).map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            logs.push({ type: 'log', msg: msg });
+            origLog.apply(console, arguments);
+          };
+          console.warn = function() {
+            const msg = Array.from(arguments).map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            logs.push({ type: 'warn', msg: msg });
+            origWarn.apply(console, arguments);
+          };
+          console.error = function() {
+            const msg = Array.from(arguments).map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            logs.push({ type: 'error', msg: msg });
+            origError.apply(console, arguments);
+          };
+          console.info = function() {
+            const msg = Array.from(arguments).map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            logs.push({ type: 'info', msg: msg });
+            origInfo.apply(console, arguments);
+          };
+          
+          window.addEventListener('error', function(e) {
+            logs.push({ type: 'error', msg: e.message + ' at ' + e.filename + ':' + e.lineno });
+          });
+          
+          window.__consoleLogs = logs;
+        })();
+      <\/script>
+      <script>
+        try {
+          ${js}
+        } catch(e) {
+          console.error(e.toString());
+        }
+        // Send logs to parent
+        if (window.__consoleLogs && window.__consoleLogs.length > 0) {
+          window.parent.postMessage({ type: 'console', logs: window.__consoleLogs }, '*');
+        }
+      <\/script>
+    </body>
+    </html>
+  `);
+  doc.close();
+  
+  document.getElementById('statusLeft').textContent = '✓ Rendered';
+  document.getElementById('statusLeft').className = 'ok';
+  saveCurrentProject();
+}
+
+// Listen for console messages from iframe
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'console') {
+    e.data.logs.forEach(log => addConsoleLog(log.type, log.msg));
+  }
+});
+
+// ============================================================
+// CONSOLE
+// ============================================================
+function toggleConsole() {
+  consoleOpen = !consoleOpen;
+  document.getElementById('consolePanel').classList.toggle('open', consoleOpen);
+  document.getElementById('consoleToggle').classList.toggle('active', consoleOpen);
+}
+
+function addConsoleLog(type, msg) {
+  const out = document.getElementById('consoleOutput');
+  const div = document.createElement('div');
+  div.className = type;
+  div.textContent = msg;
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+  if (!consoleOpen) toggleConsole();
+}
+
+function clearConsole() {
+  document.getElementById('consoleOutput').innerHTML = '';
+}
+
+// ============================================================
+// AUTO-RUN
+// ============================================================
+function onCodeChange() {
+  if (autoRun) {
+    clearTimeout(runTimer);
+    runTimer = setTimeout(runCode, 500);
+  }
+  document.getElementById('statusLeft').textContent = '✎ Editing...';
+  document.getElementById('statusLeft').className = '';
+}
+
+// ============================================================
+// UNDO
+// ============================================================
+function undoCode() {
+  const stack = undoStack[currentTab];
+  if (stack.length <= 1) return;
+  stack.pop(); // current
+  const prev = stack[stack.length - 1];
+  if (prev !== undefined) {
+    editors[currentTab].setValue(prev);
+    showToast('Undone ↩');
+  }
+}
+
+// ============================================================
+// FORMAT
+// ============================================================
+function formatCode() {
+  const ed = editors[currentTab];
+  const val = ed.getValue();
+  try {
+    const lines = val.split('\n');
+    let indent = 0;
+    const formatted = lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      if (/^<\//.test(trimmed) || /^[}\])]/.test(trimmed)) indent = Math.max(0, indent - 1);
+      const result = '  '.repeat(indent) + trimmed;
+      if (/[>{\[(]$/.test(trimmed) && !/^<\//.test(trimmed) && !/^<br/.test(trimmed) && !/^<img/.test(trimmed) && !/^<input/.test(trimmed) && !/^<hr/.test(trimmed) && !/^<meta/.test(trimmed) && !/^<link/.test(trimmed)) indent++;
+      return result;
+    }).join('\n');
+    ed.setValue(formatted);
+    showToast('Formatted ✓');
+  } catch(e) {
+    showToast('Format error');
+  }
+}
+
+// ============================================================
+// CLEAR
+// ============================================================
+function clearAll() {
+  if (!confirm('Clear all code?')) return;
+  editors.html.setValue('');
+  editors.css.setValue('');
+  editors.js.setValue('');
+  saveCurrentProject();
+  runCode();
+  showToast('Cleared');
+}
+
+// ============================================================
+// EXPORT
+// ============================================================
+function exportCode() {
+  const html = editors.html.getValue();
+  const css = editors.css.getValue();
+  const js = editors.js.getValue();
+  const full = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>${css}</style>
+</head>
+<body>
+${html}
+<script>${js}<\/script>
+</body>
+</html>`;
+  const blob = new Blob([full], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'playground-export.html';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Exported ↓');
+}
+
+// ============================================================
+// SNIPPET LIBRARY
+// ============================================================
+const snippets = [
+  { name: 'Hello World', desc: 'Basic HTML starter', html: '<h1>Hello, World!</h1>\n<p>Welcome to Code Playground.</p>', css: 'body { font-family: sans-serif; padding: 2rem; text-align: center; }\nh1 { color: #cba6f7; }', js: 'console.log("Hello from Code Playground!");' },
+  { name: 'Counter', desc: 'Interactive counter button', html: '<h1 id="count">0</h1>\n<button onclick="increment()">+1</button>\n<button onclick="reset()">Reset</button>', css: 'body { font-family: sans-serif; padding: 2rem; text-align: center; }\nbutton { margin: 0 4px; padding: 8px 16px; font-size: 16px; cursor: pointer; }', js: 'let c = 0;\nfunction increment() { c++; document.getElementById("count").textContent = c; }\nfunction reset() { c = 0; document.getElementById("count").textContent = c; }' },
+  { name: 'Todo List', desc: 'Simple todo app', html: '<input id="todoInput" placeholder="Add a todo...">\n<button onclick="addTodo()">Add</button>\n<ul id="todoList"></ul>', css: 'body { font-family: sans-serif; padding: 2rem; max-width: 400px; margin: 0 auto; }\ninput { padding: 8px; width: 70%; margin-right: 8px; }\nbutton { padding: 8px 16px; cursor: pointer; }\nli { padding: 4px 0; cursor: pointer; }\nli.done { text-decoration: line-through; color: #888; }', js: 'function addTodo() {\n  const input = document.getElementById("todoInput");\n  if (!input.value.trim()) return;\n  const li = document.createElement("li");\n  li.textContent = input.value;\n  li.onclick = () => li.classList.toggle("done");\n  document.getElementById("todoList").appendChild(li);\n  input.value = "";\n}' },
+  { name: 'CSS Animation', desc: 'Bouncing ball animation', html: '<div class="ball"></div>', css: 'body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1e1e2e; }\n.ball {\n  width: 60px; height: 60px;\n  background: linear-gradient(135deg, #cba6f7, #89b4fa);\n  border-radius: 50%;\n  animation: bounce 1s ease-in-out infinite alternate;\n}\n@keyframes bounce {\n  from { transform: translateY(0); }\n  to { transform: translateY(-100px); }\n}', js: 'console.log("Bouncing!");' },
+  { name: 'Canvas Drawing', desc: 'Canvas with mouse drawing', html: '<canvas id="canvas" width="400" height="300"></canvas>\n<div><button onclick="clearCanvas()">Clear</button></div>', css: 'body { font-family: sans-serif; padding: 2rem; text-align: center; }\ncanvas { border: 1px solid #ccc; cursor: crosshair; }\nbutton { margin-top: 8px; padding: 6px 14px; cursor: pointer; }', js: 'const canvas = document.getElementById("canvas");\nconst ctx = canvas.getContext("2d");\nlet drawing = false;\ncanvas.onmousedown = () => drawing = true;\ncanvas.onmouseup = () => drawing = false;\ncanvas.onmousemove = (e) => {\n  if (!drawing) return;\n  const rect = canvas.getBoundingClientRect();\n  ctx.fillStyle = "#cba6f7";\n  ctx.beginPath();\n  ctx.arc(e.clientX - rect.left, e.clientY - rect.top, 3, 0, Math.PI * 2);\n  ctx.fill();\n};\nfunction clearCanvas() { ctx.clearRect(0, 0, 400, 300); }' },
+  { name: 'API Fetch', desc: 'Fetch data from an API', html: '<button onclick="fetchData()">Fetch Data</button>\n<pre id="output">Click to fetch</pre>', css: 'body { font-family: sans-serif; padding: 2rem; }\npre { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto; }', js: 'async function fetchData() {\n  try {\n    const res = await fetch("https://jsonplaceholder.typicode.com/todos/1");\n    const data = await res.json();\n    document.getElementById("output").textContent = JSON.stringify(data, null, 2);\n  } catch(e) {\n    document.getElementById("output").textContent = "Error: " + e;\n  }\n}' },
+];
+
+function openSnippets() {
+  const list = document.getElementById('snippetList');
+  list.innerHTML = '';
+  snippets.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'snippet-item';
+    div.innerHTML = `<h3>${s.name}</h3><p>${s.desc}</p>`;
+    div.onclick = () => loadSnippet(i);
+    list.appendChild(div);
+  });
+  document.getElementById('snippetModal').classList.add('open');
+}
+
+function closeSnippets() {
+  document.getElementById('snippetModal').classList.remove('open');
+}
+
+function loadSnippet(idx) {
+  const s = snippets[idx];
+  editors.html.setValue(s.html);
+  editors.css.setValue(s.css);
+  editors.js.setValue(s.js);
+  closeSnippets();
+  runCode();
+  showToast('Loaded: ' + s.name);
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._hide);
+  t._hide = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ============================================================
+// RESIZABLE PANELS
+// ============================================================
+const divider = document.getElementById('divider');
+let isDragging = false;
+
+divider.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const container = document.querySelector('.main');
+  const rect = container.getBoundingClientRect();
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    const pct = ((e.clientY - rect.top) / rect.height) * 100;
+    const clamped = Math.max(30, Math.min(70, pct));
+    document.getElementById('editorPanel').style.height = clamped + '%';
+    document.querySelector('.right-panel').style.height = (100 - clamped) + '%';
+  } else {
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const clamped = Math.max(25, Math.min(75, pct));
+    document.getElementById('editorPanel').style.flex = '0 0 ' + clamped + '%';
+    document.querySelector('.right-panel').style.flex = '0 0 ' + (100 - clamped) + '%';
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (isDragging) {
+    isDragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+});
+
+// ============================================================
+// KEYBOARD SHORTCUTS (global fallback)
+// ============================================================
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runCode(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveCurrentProject(); showToast('Saved ✓'); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); undoCode(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); switchTab('html'); }
+  if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); switchTab('css'); }
+  if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); switchTab('js'); }
+});
+
+// ============================================================
+// INIT
+// ============================================================
+loadProject('__default');
+runCode();
+editors.html.focus();
+</script>
+</body>
+</html>

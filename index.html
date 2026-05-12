@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Playground</title>
+<meta http-equiv="refresh" content="0; url=index-v2.html">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
+  
+  header { background: #181825; padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #313244; }
+  header h1 { font-size: 18px; font-weight: 600; color: #cba6f7; }
+  header span.sub { font-size: 12px; color: #6c7086; }
+  .spacer { flex: 1; }
+  .btn { background: #313244; border: none; color: #cdd6f4; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: 0.15s; }
+  .btn:hover { background: #45475a; }
+  .btn.primary { background: #cba6f7; color: #1e1e2e; font-weight: 600; }
+  .btn.primary:hover { background: #b4befe; }
+  .btn.danger { background: #f38ba8; color: #1e1e2e; }
+  .btn.danger:hover { background: #eba0ac; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+  
+  .editor-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .editor-tabs { display: flex; background: #181825; border-bottom: 1px solid #313244; }
+  .editor-tab { padding: 8px 16px; font-size: 12px; cursor: pointer; border-right: 1px solid #313244; color: #6c7086; transition: 0.15s; }
+  .editor-tab.active { background: #1e1e2e; color: #cdd6f4; border-bottom: 2px solid #cba6f7; }
+  .editor-tab:hover:not(.active) { color: #cdd6f4; }
+  
+  .editor-container { flex: 1; position: relative; }
+  .editor-container textarea { 
+    width: 100%; height: 100%; background: #1e1e2e; color: #cdd6f4; 
+    border: none; outline: none; padding: 16px; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    font-size: 13px; line-height: 1.6; resize: none; tab-size: 2;
+  }
+  .editor-container textarea::placeholder { color: #45475a; }
+
+  .divider { width: 6px; background: #313244; cursor: col-resize; flex-shrink: 0; position: relative; }
+  .divider:hover { background: #45475a; }
+  .divider::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 2px; height: 30px; background: #585b70; border-radius: 2px; }
+
+  .preview-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .preview-header { background: #181825; padding: 8px 16px; font-size: 12px; color: #6c7086; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 8px; }
+  .preview-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #a6e3a1; }
+  .preview-frame { flex: 1; background: white; }
+  .preview-frame iframe { width: 100%; height: 100%; border: none; }
+
+  .status-bar { background: #181825; padding: 6px 16px; font-size: 11px; color: #6c7086; border-top: 1px solid #313244; display: flex; gap: 16px; }
+  .status-bar .error { color: #f38ba8; }
+  .status-bar .ok { color: #a6e3a1; }
+
+  .toast { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); background: #313244; color: #cdd6f4; padding: 10px 20px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>✦ Code Playground</h1>
+  <span class="sub">HTML / CSS / JS</span>
+  <div class="spacer"></div>
+  <button class="btn" onclick="runCode()">▶ Run</button>
+  <button class="btn" onclick="formatCode()">↯ Format</button>
+  <button class="btn" onclick="clearAll()">✕ Clear</button>
+  <button class="btn primary" onclick="exportCode()">↓ Export</button>
+</header>
+
+<div class="main">
+  <div class="editor-panel" id="editorPanel">
+    <div class="editor-tabs">
+      <div class="editor-tab active" data-tab="html" onclick="switchTab('html')">HTML</div>
+      <div class="editor-tab" data-tab="css" onclick="switchTab('css')">CSS</div>
+      <div class="editor-tab" data-tab="js" onclick="switchTab('js')">JS</div>
+    </div>
+    <div class="editor-container">
+      <textarea id="htmlEditor" placeholder="<!-- HTML here -->" spellcheck="false"></textarea>
+      <textarea id="cssEditor" placeholder="/* CSS here */" spellcheck="false" style="display:none"></textarea>
+      <textarea id="jsEditor" placeholder="// JavaScript here" spellcheck="false" style="display:none"></textarea>
+    </div>
+  </div>
+  <div class="divider" id="divider"></div>
+  <div class="preview-panel">
+    <div class="preview-header"><span class="dot"></span> Live Preview</div>
+    <div class="preview-frame"><iframe id="preview" sandbox="allow-scripts allow-modals allow-same-origin"></iframe></div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="statusLeft">Ready</span>
+  <span class="spacer"></span>
+  <span id="statusRight">Auto-run: ON</span>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+  // State
+  let currentTab = 'html';
+  let autoRun = true;
+  let runTimer = null;
+
+  const editors = {
+    html: document.getElementById('htmlEditor'),
+    css: document.getElementById('cssEditor'),
+    js: document.getElementById('jsEditor')
+  };
+  const preview = document.getElementById('preview');
+
+  // Load saved code
+  function loadSaved() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('codePlayground'));
+      if (saved) {
+        editors.html.value = saved.html || '';
+        editors.css.value = saved.css || '';
+        editors.js.value = saved.js || '';
+      }
+    } catch(e) {}
+  }
+
+  // Save code
+  function saveCode() {
+    try {
+      localStorage.setItem('codePlayground', JSON.stringify({
+        html: editors.html.value,
+        css: editors.css.value,
+        js: editors.js.value
+      }));
+    } catch(e) {}
+  }
+
+  // Tab switching
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.editor-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    Object.entries(editors).forEach(([key, el]) => el.style.display = key === tab ? 'block' : 'none');
+    editors[tab].focus();
+  }
+
+  // Run code
+  function runCode() {
+    const html = editors.html.value;
+    const css = editors.css.value;
+    const js = editors.js.value;
+
+    const doc = preview.contentDocument || preview.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+      <head><style>${css}</style></head>
+      <body>
+        ${html}
+        <script>${js}<\/script>
+      </body>
+      </html>
+    `);
+    doc.close();
+    document.getElementById('statusLeft').textContent = '✓ Rendered';
+    document.getElementById('statusLeft').className = 'ok';
+    saveCode();
+  }
+
+  // Auto-run on input
+  function onCodeChange() {
+    if (autoRun) {
+      clearTimeout(runTimer);
+      runTimer = setTimeout(runCode, 400);
+    }
+    document.getElementById('statusLeft').textContent = '✎ Editing...';
+    document.getElementById('statusLeft').className = '';
+  }
+
+  editors.html.addEventListener('input', onCodeChange);
+  editors.css.addEventListener('input', onCodeChange);
+  editors.js.addEventListener('input', onCodeChange);
+
+  // Format code (basic)
+  function formatCode() {
+    const el = editors[currentTab];
+    try {
+      // Simple indentation fix
+      const lines = el.value.split('\n');
+      let indent = 0;
+      const formatted = lines.map(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('</') || trimmed.startsWith('}') || trimmed.startsWith(']') || trimmed.startsWith(')')) indent = Math.max(0, indent - 1);
+        const result = '  '.repeat(indent) + trimmed;
+        if (trimmed.endsWith('>') && !trimmed.startsWith('</') && !trimmed.startsWith('<br') && !trimmed.startsWith('<img') && !trimmed.startsWith('<input') && !trimmed.startsWith('<hr') && !trimmed.startsWith('<meta') && !trimmed.startsWith('<link')) indent++;
+        if (trimmed.endsWith('{') || trimmed.endsWith('[') || trimmed.endsWith('(')) indent++;
+        return result;
+      }).join('\n');
+      el.value = formatted;
+      showToast('Formatted ✓');
+    } catch(e) {
+      showToast('Format error');
+    }
+  }
+
+  // Clear all
+  function clearAll() {
+    if (!confirm('Clear all code?')) return;
+    editors.html.value = '';
+    editors.css.value = '';
+    editors.js.value = '';
+    saveCode();
+    runCode();
+    showToast('Cleared');
+  }
+
+  // Export as HTML file
+  function exportCode() {
+    const html = editors.html.value;
+    const css = editors.css.value;
+    const js = editors.js.value;
+    const full = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>${css}</style>
+</head>
+<body>
+${html}
+<script>${js}<\/script>
+</body>
+</html>`;
+    const blob = new Blob([full], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'playground-export.html';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Exported ↓');
+  }
+
+  // Toast
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // Resizable panels
+  const divider = document.getElementById('divider');
+  let isDragging = false;
+
+  divider.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const container = document.querySelector('.main');
+    const rect = container.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const clamped = Math.max(25, Math.min(75, pct));
+    document.getElementById('editorPanel').style.flex = clamped + '%';
+    document.querySelector('.preview-panel').style.flex = (100 - clamped) + '%';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runCode(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveCode(); showToast('Saved ✓'); }
+    if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); switchTab('html'); }
+    if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); switchTab('css'); }
+    if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); switchTab('js'); }
+  });
+
+  // Init
+  loadSaved();
+  runCode();
+  editors.html.focus();
+</script>
+</body>
+</html>

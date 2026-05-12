@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RISC-V VM / OS Simulator</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0d1117; color: #c9d1d9; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; overflow: hidden; height: 100vh; }
+.app { display: grid; grid-template-columns: 1fr 320px; grid-template-rows: 40px 1fr 200px; height: 100vh; gap: 1px; background: #21262d; }
+.toolbar { grid-column: 1 / -1; background: #161b22; display: flex; align-items: center; padding: 0 12px; gap: 8px; border-bottom: 1px solid #30363d; }
+.toolbar .title { font-weight: 600; font-size: 13px; color: #58a6ff; margin-right: 16px; }
+.toolbar button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; }
+.toolbar button:hover { background: #30363d; }
+.toolbar button.primary { background: #238636; border-color: #2ea043; }
+.toolbar button.primary:hover { background: #2ea043; }
+.toolbar button.danger { background: #da3633; border-color: #f85149; }
+.toolbar button.danger:hover { background: #f85149; }
+.toolbar .status { margin-left: auto; font-size: 11px; color: #8b949e; }
+.toolbar .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.toolbar .status .dot.running { background: #3fb950; }
+.toolbar .status .dot.stopped { background: #f85149; }
+.toolbar .status .dot.halted { background: #d29922; }
+.main { background: #0d1117; display: flex; flex-direction: column; overflow: hidden; }
+#terminal { flex: 1; padding: 4px; }
+.sidebar { background: #161b22; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid #30363d; }
+.sidebar-tabs { display: flex; background: #0d1117; border-bottom: 1px solid #30363d; }
+.sidebar-tabs button { flex: 1; background: none; border: none; color: #8b949e; padding: 6px; cursor: pointer; font-size: 11px; font-family: inherit; border-bottom: 2px solid transparent; }
+.sidebar-tabs button.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.sidebar-content { flex: 1; overflow-y: auto; padding: 8px; font-size: 11px; }
+.sidebar-content .section { margin-bottom: 12px; }
+.sidebar-content .section-title { color: #8b949e; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.reg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.reg-item { background: #0d1117; padding: 2px 4px; border-radius: 2px; font-size: 10px; }
+.reg-item .name { color: #8b949e; }
+.reg-item .value { color: #79c0ff; }
+.mem-row { font-family: 'SF Mono', monospace; font-size: 10px; color: #8b949e; }
+.mem-row .addr { color: #484f58; }
+.mem-row .bytes { color: #79c0ff; }
+.proc-item { background: #0d1117; padding: 4px 6px; border-radius: 4px; margin-bottom: 4px; font-size: 10px; }
+.proc-item .name { color: #58a6ff; font-weight: 600; }
+.proc-item .state { display: inline-block; padding: 1px 4px; border-radius: 3px; font-size: 9px; }
+.proc-item .state.ready { background: #1f6feb33; color: #58a6ff; }
+.proc-item .state.running { background: #23863633; color: #3fb950; }
+.proc-item .state.terminated { background: #da363333; color: #f85149; }
+.bottom-panel { grid-column: 1 / -1; background: #161b22; border-top: 1px solid #30363d; display: flex; flex-direction: column; }
+.bottom-tabs { display: flex; background: #0d1117; border-bottom: 1px solid #30363d; }
+.bottom-tabs button { background: none; border: none; color: #8b949e; padding: 4px 12px; cursor: pointer; font-size: 11px; font-family: inherit; border-bottom: 2px solid transparent; }
+.bottom-tabs button.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.bottom-content { flex: 1; overflow-y: auto; padding: 8px; font-size: 11px; }
+#asm-editor { width: 100%; height: 100%; background: #0d1117; color: #c9d1d9; border: none; font-family: 'SF Mono', monospace; font-size: 12px; resize: none; outline: none; padding: 8px; tab-size: 4; }
+#output-log { font-family: 'SF Mono', monospace; font-size: 11px; color: #8b949e; white-space: pre-wrap; }
+#output-log .info { color: #58a6ff; }
+#output-log .error { color: #f85149; }
+#output-log .success { color: #3fb950; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="toolbar">
+    <span class="title">🖥️ RISC-V VM / OS Simulator</span>
+    <button class="primary" onclick="vmStart()">▶ Run</button>
+    <button onclick="vmPause()">⏸ Pause</button>
+    <button onclick="vmStep()">⏭ Step</button>
+    <button class="danger" onclick="vmReset()">⟳ Reset</button>
+    <select id="program-select" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:3px 8px;font-size:12px;font-family:inherit;margin-left:8px;">
+      <option value="fibonacci">Fibonacci</option>
+      <option value="primes">Prime Sieve</option>
+      <option value="counter">Counter</option>
+      <option value="echo">Echo</option>
+      <option value="shell">Shell</option>
+    </select>
+    <button onclick="vmLoadProgram()">Load</button>
+    <span class="status" id="status-bar"><span class="dot stopped"></span>Stopped</span>
+  </div>
+  <div class="main">
+    <div id="terminal"></div>
+  </div>
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="active" onclick="switchSidebar('regs',this)">Registers</button>
+      <button onclick="switchSidebar('mem',this)">Memory</button>
+      <button onclick="switchSidebar('procs',this)">Processes</button>
+    </div>
+    <div class="sidebar-content" id="sidebar-regs">
+      <div class="section"><div class="section-title">CPU Registers</div><div class="reg-grid" id="reg-display"></div></div>
+      <div class="section"><div class="section-title">PC: <span id="pc-display" style="color:#79c0ff">0x00000000</span></div></div>
+      <div class="section"><div class="section-title">Cycles: <span id="cycle-display" style="color:#79c0ff">0</span></div></div>
+    </div>
+    <div class="sidebar-content" id="sidebar-mem" style="display:none">
+      <div class="section">
+        <div class="section-title">Memory Hex Dump</div>
+        <div style="margin-bottom:4px;display:flex;gap:4px;">
+          <input id="mem-addr" type="text" value="0x0000" style="width:80px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:2px 4px;font-family:inherit;font-size:10px;">
+          <input id="mem-len" type="text" value="128" style="width:50px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:2px 4px;font-family:inherit;font-size:10px;">
+          <button onclick="refreshMem()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:10px;">Dump</button>
+        </div>
+        <div id="mem-display" style="font-family:'SF Mono',monospace;font-size:10px;color:#8b949e;white-space:pre;"></div>
+      </div>
+    </div>
+    <div class="sidebar-content" id="sidebar-procs" style="display:none">
+      <div class="section"><div class="section-title">Process List</div><div id="proc-display"></div></div>
+    </div>
+  </div>
+  <div class="bottom-panel">
+    <div class="bottom-tabs">
+      <button class="active" onclick="switchBottom('asm',this)">Assembly</button>
+      <button onclick="switchBottom('output',this)">Output</button>
+    </div>
+    <div class="bottom-content" id="bottom-asm">
+      <textarea id="asm-editor" spellcheck="false"></textarea>
+    </div>
+    <div class="bottom-content" id="bottom-output" style="display:none">
+      <div id="output-log"></div>
+    </div>
+  </div>
+</div>
+<script>
+// ============================================================
+// RISC-V VM / OS Simulator — Part 1: CPU Core
+// ============================================================
+
+class RISCVCPU {
+  constructor(memory) {
+    this.mem = memory;
+    this.pc = 0;
+    this.regs = new Uint32Array(32); // x0-x31, x0 always 0
+    this.regs[0] = 0;
+    this.cycleCount = 0;
+    this.halted = false;
+    this.trap = false;
+    this.trapCause = 0;
+    this.trapValue = 0;
+    this.breakpoints = new Set();
+    this.stepMode = false;
+    this.onBreakpoint = null;
+    this.onTrap = null;
+    this.onCycle = null;
+  }
+
+  reset() {
+    this.pc = 0;
+    this.regs.fill(0);
+    this.regs[0] = 0;
+    this.cycleCount = 0;
+    this.halted = false;
+    this.trap = false;
+  }
+
+  readReg(r) { return r === 0 ? 0 : this.regs[r]; }
+  writeReg(r, v) { if (r !== 0) { this.regs[r] = v >>> 0; } }
+
+  // RV32I instruction decode
+  fetch() {
+    if (this.pc + 4 > this.mem.size) {
+      this.trap = true;
+      this.trapCause = 1; // instruction access fault
+      return 0;
+    }
+    return this.mem.read32(this.pc);
+  }
+
+  step() {
+    if (this.halted || this.trap) return false;
+    
+    if (this.breakpoints.has(this.pc)) {
+      this.stepMode = true;
+      if (this.onBreakpoint) this.onBreakpoint(this.pc);
+      return false;
+    }
+
+    const instr = this.fetch();
+    if (this.trap) return false;
+
+    this.cycleCount++;
+    const nextPC = this.pc + 4;
+    this.execute(instr, nextPC);
+    if (this.onCycle) this.onCycle(this.cycleCount);
+    return !this.halted && !this.trap;
+  }
+
+  execute(instr, nextPC) {
+    const opcode = instr & 0x7f;
+    const rd = (instr >>> 7) & 0x1f;
+    const funct3 = (instr >>> 12) & 0x7;
+    const rs1 = (instr >>> 15) & 0x1f;
+    const rs2 = (instr >>> 20) & 0x1f;
+    const funct7 = (instr >>> 25) & 0x7f;
+
+    const immI = (instr >>> 20); // sign-extended 12-bit
+    const immIS = (immI & 0x800) ? (immI | 0xfffff000) : immI;
+    const immS = ((instr >>> 25) << 5) | ((instr >>> 7) & 0x1f);
+    const immSS = (immS & 0x800) ? (immS | 0xfffff000) : immS;
+    const immB = ((instr >>> 31) << 12) | (((instr >>> 25) & 0x3f) << 5) | (((instr >>> 8) & 0xf) << 1) | (((instr >>> 7) & 1) << 11);
+    const immBS = (immB & 0x1000) ? (immB | 0xffffe000) : immB;
+    const immU = instr & 0xfffff000;
+    const immJ = ((instr >>> 31) << 20) | (((instr >>> 12) & 0xff) << 12) | (((instr >>> 20) & 1) << 11) | (((instr >>> 21) & 0x3ff) << 1);
+    const immJS = (immJ & 0x100000) ? (immJ | 0xffe00000) : immJ;
+
+    const v1 = this.readReg(rs1);
+    const v2 = this.readReg(rs2);
+
+    switch (opcode) {
+      case 0x37: // LUI
+        this.writeReg(rd, immU);
+        this.pc = nextPC;
+        break;
+      case 0x17: // AUIPC
+        this.writeReg(rd, (this.pc + immU) >>> 0);
+        this.pc = nextPC;
+        break;
+      case 0x6f: // JAL
+        this.writeReg(rd, nextPC);
+        this.pc = (this.pc + immJS) >>> 0;
+        break;
+      case 0x67: // JALR
+        this.writeReg(rd, nextPC);
+        this.pc = ((v1 + immIS) & ~1) >>> 0;
+        break;
+      case 0x63: // BRANCH
+        let taken = false;
+        switch (funct3) {
+          case 0: taken = (v1 === v2); break; // BEQ
+          case 1: taken = (v1 !== v2); break; // BNE
+          case 4: taken = ((v1|0) < (v2|0)); break; // BLT
+          case 5: taken = ((v1|0) >= (v2|0)); break; // BGE
+          case 6: taken = (v1 < v2); break; // BLTU
+          case 7: taken = (v1 >= v2); break; // BGEU
+        }
+        this.pc = taken ? (this.pc + immBS) >>> 0 : nextPC;
+        break;
+      case 0x03: // LOAD
+        {
+          const addr = (v1 + immIS) >>> 0;
+          let val = 0;
+          switch (funct3) {
+            case 0: val = this.mem.read8(addr); break; // LB
+            case 1: val = this.mem.read16(addr); break; // LH
+            case 2: val = this.mem.read32(addr); break; // LW
+            case 4: val = this.mem.read8(addr); val = (val & 0x80) ? (val | 0xffffff00) : val; break; // LBU
+            case 5: val = this.mem.read16(addr); val = (val & 0x8000) ? (val | 0xffff0000) : val; break; // LHU
+          }
+          this.writeReg(rd, val >>> 0);
+          this.pc = nextPC;
+        }
+        break;
+      case 0x23: // STORE
+        {
+          const addr = (v1 + immSS) >>> 0;
+          switch (funct3) {
+            case 0: this.mem.write8(addr, v2 & 0xff); break;
+            case 1: this.mem.write16(addr, v2 & 0xffff); break;
+            case 2: this.mem.write32(addr, v2); break;
+          }
+          this.pc = nextPC;
+        }
+        break;
+      case 0x13: // OP-IMM
+        {
+          let res = 0;
+          switch (funct3) {
+            case 0: res = v1 + immIS; break; // ADDI
+            case 1: res = v1 << (immIS & 0x1f); break; // SLLI (funct7=0)
+            case 2: res = (v1|0) < (immIS|0); break; // SLTI
+            case 3: res = v1 < immIS; break; // SLTIU
+            case 4: res = v1 ^ immIS; break; // XORI
+            case 5: res = (funct7 === 0x20) ? ((v1|0) >> (immIS & 0x1f)) : (v1 >>> (immIS & 0x1f)); break; // SRLI/SRAI
+            case 6: res = v1 | immIS; break; // ORI
+            case 7: res = v1 & immIS; break; // ANDI
+          }
+          this.writeReg(rd, res >>> 0);
+          this.pc = nextPC;
+        }
+        break;
+      case 0x33: // OP (RV32I + RV32M)
+        {
+          let res = 0;
+          if (funct7 === 0x01) { // RV32M multiply/divide
+            const s1 = v1|0, s2 = v2|0;
+            switch (funct3) {
+              case 0: res = Math.imul(v1, v2); break; // MUL (low 32 bits)
+              case 1: { // MULH
+                const h1 = Math.floor(v1 / 65536), l1 = v1 & 0xffff;
+                const h2 = Math.floor(v2 / 65536), l2 = v2 & 0xffff;
+                res = (((((h1*l2 + l1*h2) >>> 0) + ((l1*l2) >>> 16)) >>> 16) + h1*h2) >>> 0;
+                break;
+              }
+              case 4: res = (s2 === 0) ? -1 : Math.floor(s1 / s2); break; // DIV
+              case 5: res = (v2 === 0) ? 0xffffffff : Math.floor(v1 / v2); break; // DIVU
+              case 6: res = (s2 === 0) ? s1 : (s1 % s2); break; // REM
+              case 7: res = (v2 === 0) ? v1 : (v1 % v2); break; // REMU
+              default: res = 0;
+            }
+          } else {
+            switch (funct3) {
+              case 0: res = (funct7 === 0x20) ? ((v1|0) - (v2|0)) : (v1 + v2); break; // ADD/SUB
+              case 1: res = v1 << (v2 & 0x1f); break; // SLL
+              case 2: res = (v1|0) < (v2|0); break; // SLT
+              case 3: res = v1 < v2; break; // SLTU
+              case 4: res = v1 ^ v2; break; // XOR
+              case 5: res = (funct7 === 0x20) ? ((v1|0) >> (v2 & 0x1f)) : (v1 >>> (v2 & 0x1f)); break; // SRL/SRA
+              case 6: res = v1 | v2; break; // OR
+              case 7: res = v1 & v2; break; // AND
+            }
+          }
+          this.writeReg(rd, res >>> 0);
+          this.pc = nextPC;
+        }
+        break;
+      case 0x73: // SYSTEM (ECALL/EBREAK)
+        if (funct3 === 0) {
+          if (immI === 0) { // ECALL
+            this.trap = true;
+            this.trapCause = 11; // environment call from M-mode
+            this.trapValue = this.regs[17]; // a7 = syscall number
+          } else if (immI === 1) { // EBREAK
+            this.trap = true;
+            this.trapCause = 3; // breakpoint
+          }
+        }
+        this.pc = nextPC;
+        break;
+      case 0x0f: // FENCE
+        this.pc = nextPC;
+        break;
+      default:
+        this.trap = true;
+        this.trapCause = 2; // illegal instruction
+        this.pc = nextPC;
+    }
+  }
+
+  run(maxCycles = 100000) {
+    let cycles = 0;
+    while (!this.halted && !this.trap && cycles < maxCycles) {
+      if (this.breakpoints.has(this.pc)) {
+        if (this.onBreakpoint) this.onBreakpoint(this.pc);
+        return false;
+      }
+      this.step();
+      cycles++;
+    }
+    return this.halted;
+  }
+}
+// ============================================================
+// Part 2: Memory System + MMU + Assembler
+// ============================================================
+
+class Memory {
+  constructor(size = 65536) {
+    this.size = size;
+    this.data = new Uint8Array(size);
+    this.mmio = new Map(); // addr -> { read8, read16, read32, write8, write16, write32 }
+  }
+
+  mapMMIO(base, handler) {
+    this.mmio.set(base, handler);
+  }
+
+  _checkAddr(addr, len) {
+    if (addr + len > this.size) throw new Error(`Memory access fault at 0x${addr.toString(16)}`);
+  }
+
+  read8(addr) {
+    const handler = this._findMMIO(addr);
+    if (handler) return handler.read8(addr);
+    this._checkAddr(addr, 1);
+    return this.data[addr];
+  }
+
+  read16(addr) {
+    const handler = this._findMMIO(addr);
+    if (handler) return handler.read16(addr);
+    this._checkAddr(addr, 2);
+    return this.data[addr] | (this.data[addr+1] << 8);
+  }
+
+  read32(addr) {
+    const handler = this._findMMIO(addr);
+    if (handler) return handler.read32(addr);
+    this._checkAddr(addr, 4);
+    return (this.data[addr] | (this.data[addr+1] << 8) | 
+            (this.data[addr+2] << 16) | (this.data[addr+3] << 24)) >>> 0;
+  }
+
+  write8(addr, val) {
+    const handler = this._findMMIO(addr);
+    if (handler) { handler.write8(addr, val & 0xff); return; }
+    this._checkAddr(addr, 1);
+    this.data[addr] = val & 0xff;
+  }
+
+  write16(addr, val) {
+    const handler = this._findMMIO(addr);
+    if (handler) { handler.write16(addr, val & 0xffff); return; }
+    this._checkAddr(addr, 2);
+    this.data[addr] = val & 0xff;
+    this.data[addr+1] = (val >> 8) & 0xff;
+  }
+
+  write32(addr, val) {
+    const handler = this._findMMIO(addr);
+    if (handler) { handler.write32(addr, val >>> 0); return; }
+    this._checkAddr(addr, 4);
+    this.data[addr] = val & 0xff;
+    this.data[addr+1] = (val >> 8) & 0xff;
+    this.data[addr+2] = (val >> 16) & 0xff;
+    this.data[addr+3] = (val >> 24) & 0xff;
+  }
+
+  _findMMIO(addr) {
+    for (const [base, handler] of this.mmio) {
+      if (addr >= base && addr < base + (handler.size || 4096)) return handler;
+    }
+    return null;
+  }
+
+  loadBinary(data, offset = 0) {
+    for (let i = 0; i < data.length; i++) {
+      this.data[offset + i] = data[i];
+    }
+  }
+
+  hexDump(start, len) {
+    let out = '';
+    for (let i = 0; i < len; i += 16) {
+      const addr = start + i;
+      out += `0x${addr.toString(16).padStart(8, '0')}: `;
+      for (let j = 0; j < 16 && i + j < len; j++) {
+        out += this.data[addr + j].toString(16).padStart(2, '0') + ' ';
+      }
+      out += '\n';
+    }
+    return out;
+  }
+}
+
+// UART: memory-mapped serial port at 0x10000000
+class UART {
+  constructor() {
+    this.base = 0x10000000;
+    this.size = 8;
+    this.txBuffer = '';
+    this.rxBuffer = '';
+    this.onData = null;
+    this.irq = false;
+  }
+
+  read8(addr) {
+    const offset = addr - this.base;
+    switch (offset) {
+      case 0: // RBR (receive buffer)
+        if (this.rxBuffer.length > 0) {
+          const ch = this.rxBuffer.charCodeAt(0);
+          this.rxBuffer = this.rxBuffer.slice(1);
+          return ch;
+        }
+        return 0;
+      case 5: // LSR (line status)
+        return 0x60 | (this.rxBuffer.length > 0 ? 1 : 0); // TX empty + RX ready
+      default:
+        return 0;
+    }
+  }
+
+  read32(addr) { return this.read8(addr); }
+  read16(addr) { return this.read8(addr); }
+
+  write8(addr, val) {
+    const offset = addr - this.base;
+    if (offset === 0) { // THR (transmit holding)
+      this.txBuffer += String.fromCharCode(val);
+      if (this.onData) this.onData(val);
+    }
+  }
+
+  write16(addr, val) { this.write8(addr, val & 0xff); }
+  write32(addr, val) { this.write8(addr, val & 0xff); }
+
+  write(str) {
+    for (let i = 0; i < str.length; i++) {
+      this.rxBuffer += str[i];
+    }
+  }
+}
+
+// Simple RISC-V assembler (subset for demo programs)
+class Assembler {
+  constructor() {
+    this.labels = {};
+    this.code = [];
+    this.pos = 0;
+  }
+
+  assemble(src) {
+    this.labels = {};
+    this.code = [];
+    this.pos = 0;
+
+    // First pass: find labels
+    const lines = src.split('\n');
+    for (const line of lines) {
+      const trimmed = line.replace(/#.*$/, '').trim();
+      if (!trimmed) continue;
+      if (trimmed.endsWith(':')) {
+        this.labels[trimmed.slice(0, -1)] = this.pos;
+      } else {
+        this.pos += 4;
+      }
+    }
+
+    // Second pass: emit instructions
+    this.pos = 0;
+    for (const line of lines) {
+      const trimmed = line.replace(/#.*$/, '').trim();
+      if (!trimmed || trimmed.endsWith(':')) continue;
+      
+      const parts = trimmed.replace(/,/g, ' ').split(/\s+/);
+      const op = parts[0].toLowerCase();
+      const args = parts.slice(1).filter(a => a.length > 0);
+
+      try {
+        const instr = this._emit(op, args);
+        this.code.push(instr);
+        this.pos += 4;
+      } catch (e) {
+        console.warn(`Assembler error at "${trimmed}": ${e.message}`);
+        this.code.push(0x00000013); // nop (addi x0, x0, 0)
+      }
+    }
+
+    return new Uint32Array(this.code);
+  }
+
+  _reg(r) {
+    const map = { zero:0, ra:1, sp:2, gp:3, tp:4, t0:5, t1:6, t2:7,
+                  s0:8, fp:8, s1:9, a0:10, a1:11, a2:12, a3:13, a4:14, a5:15,
+                  a6:16, a7:17, s2:18, s3:19, s4:20, s5:21, s6:22, s7:23,
+                  s8:24, s9:25, s10:26, s11:27, t3:28, t4:29, t5:30, t6:31 };
+    if (r.startsWith('x')) return parseInt(r.slice(1));
+    return map[r] !== undefined ? map[r] : parseInt(r);
+  }
+
+  _imm(s) {
+    if (this.labels[s] !== undefined) return this.labels[s] - this.pos;
+    if (s.startsWith('0x')) return parseInt(s, 16);
+    return parseInt(s);
+  }
+
+  _emit(op, args) {
+    const R_type = (funct7, rs2, rs1, funct3, rd, opcode) =>
+      (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
+    const I_type = (imm, rs1, funct3, rd, opcode) => {
+      const i = imm & 0xfff;
+      return (i << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
+    };
+    const S_type = (imm, rs2, rs1, funct3, opcode) => {
+      const i = imm & 0xfff;
+      return ((i >> 5) << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | ((i & 0x1f) << 7) | opcode;
+    };
+    const B_type = (imm, rs2, rs1, funct3, opcode) => {
+      const i = imm & 0x1ffe;
+      return ((i >> 12) << 31) | (((i >> 5) & 0x3f) << 25) | (rs2 << 20) | (rs1 << 15) | 
+             (funct3 << 12) | (((i >> 1) & 0xf) << 8) | ((i >> 11) << 7) | opcode;
+    };
+    const U_type = (imm, rd, opcode) => (imm & 0xfffff000) | (rd << 7) | opcode;
+    const J_type = (imm, rd, opcode) => {
+      const i = imm & 0x1ffffe;
+      return ((i >> 20) << 31) | (((i >> 1) & 0x3ff) << 21) | (((i >> 11) & 1) << 20) |
+             (((i >> 12) & 0xff) << 12) | (rd << 7) | opcode;
+    };
+
+    const rd = args.length > 0 ? this._reg(args[0]) : 0;
+    const rs1 = args.length > 1 ? this._reg(args[1]) : 0;
+    const rs2 = args.length > 2 ? this._reg(args[2]) : 0;
+
+    switch (op) {
+      case 'nop': return 0x00000013;
+      case 'add': return R_type(0x00, rs2, rs1, 0x0, rd, 0x33);
+      case 'sub': return R_type(0x20, rs2, rs1, 0x0, rd, 0x33);
+      case 'sll': return R_type(0x00, rs2, rs1, 0x1, rd, 0x33);
+      case 'slt': return R_type(0x00, rs2, rs1, 0x2, rd, 0x33);
+      case 'sltu': return R_type(0x00, rs2, rs1, 0x3, rd, 0x33);
+      case 'xor': return R_type(0x00, rs2, rs1, 0x4, rd, 0x33);
+      case 'srl': return R_type(0x00, rs2, rs1, 0x5, rd, 0x33);
+      case 'sra': return R_type(0x20, rs2, rs1, 0x5, rd, 0x33);
+      case 'or': return R_type(0x00, rs2, rs1, 0x6, rd, 0x33);
+      case 'and': return R_type(0x00, rs2, rs1, 0x7, rd, 0x33);
+      case 'addi': return I_type(this._imm(args[2]), rs1, 0x0, rd, 0x13);
+      case 'slli': return I_type(this._imm(args[2]), rs1, 0x1, rd, 0x13);
+      case 'slti': return I_type(this._imm(args[2]), rs1, 0x2, rd, 0x13);
+      case 'sltiu': return I_type(this._imm(args[2]), rs1, 0x3, rd, 0x13);
+      case 'xori': return I_type(this._imm(args[2]), rs1, 0x4, rd, 0x13);
+      case 'srli': return I_type(this._imm(args[2]), rs1, 0x5, rd, 0x13);
+      case 'srai': return I_type(this._imm(args[2]) | 0x400, rs1, 0x5, rd, 0x13);
+      case 'ori': return I_type(this._imm(args[2]), rs1, 0x6, rd, 0x13);
+      case 'andi': return I_type(this._imm(args[2]), rs1, 0x7, rd, 0x13);
+      case 'lb': return I_type(this._imm(args[2]), rs1, 0x0, rd, 0x03);
+      case 'lh': return I_type(this._imm(args[2]), rs1, 0x1, rd, 0x03);
+      case 'lw': return I_type(this._imm(args[2]), rs1, 0x2, rd, 0x03);
+      case 'lbu': return I_type(this._imm(args[2]), rs1, 0x4, rd, 0x03);
+      case 'lhu': return I_type(this._imm(args[2]), rs1, 0x5, rd, 0x03);
+      case 'sb': return S_type(this._imm(args[2]), rs2, rs1, 0x0, 0x23);
+      case 'sh': return S_type(this._imm(args[2]), rs2, rs1, 0x1, 0x23);
+      case 'sw': return S_type(this._imm(args[2]), rs2, rs1, 0x2, 0x23);
+      case 'beq': return B_type(this._imm(args[2]), rs2, rs1, 0x0, 0x63);
+      case 'bne': return B_type(this._imm(args[2]), rs2, rs1, 0x1, 0x63);
+      case 'blt': return B_type(this._imm(args[2]), rs2, rs1, 0x4, 0x63);
+      case 'bge': return B_type(this._imm(args[2]), rs2, rs1, 0x5, 0x63);
+      case 'bltu': return B_type(this._imm(args[2]), rs2, rs1, 0x6, 0x63);
+      case 'bgeu': return B_type(this._imm(args[2]), rs2, rs1, 0x7, 0x63);
+      case 'lui': return U_type(this._imm(args[1]), rd, 0x37);
+      case 'auipc': return U_type(this._imm(args[1]), rd, 0x17);
+      case 'jal': return J_type(this._imm(args[1]), rd, 0x6f);
+      case 'jalr': return I_type(this._imm(args[2]), rs1, 0x0, rd, 0x67);
+      case 'ecall': return 0x00000073;
+      case 'ebreak': return 0x00100073;
+      case 'fence': return 0x0ff0000f;
+      case 'mv': return R_type(0x00, 0, rs1, 0x0, rd, 0x33); // addi rd, rs1, 0
+      case 'li': return I_type(this._imm(args[1]), 0, 0x0, rd, 0x13); // addi rd, x0, imm
+      case 'j': return J_type(this._imm(args[0]), 0, 0x6f); // jal x0, offset
+      case 'jr': return I_type(0, rs1, 0x0, 0, 0x67); // jalr x0, rs1, 0
+      case 'ret': return I_type(0, 1, 0x0, 0, 0x67); // jalr x0, ra, 0
+      case 'mul': return R_type(0x01, rs2, rs1, 0x0, rd, 0x33);
+      case 'mulh': return R_type(0x01, rs2, rs1, 0x1, rd, 0x33);
+      case 'mulhsu': return R_type(0x01, rs2, rs1, 0x3, rd, 0x33);
+      case 'mulhu': return R_type(0x01, rs2, rs1, 0x3, rd, 0x33);
+      case 'div': return R_type(0x01, rs2, rs1, 0x4, rd, 0x33);
+      case 'divu': return R_type(0x01, rs2, rs1, 0x5, rd, 0x33);
+      case 'rem': return R_type(0x01, rs2, rs1, 0x6, rd, 0x33);
+      case 'remu': return R_type(0x01, rs2, rs1, 0x7, rd, 0x33);
+      case 'call': return J_type(this._imm(args[0]), 1, 0x6f); // jal ra, offset
+      default: throw new Error(`Unknown instruction: ${op}`);
+    }
+  }
+}
+// ============================================================
+// Part 3: OS Kernel — Process Scheduler, Syscalls, Demo Programs
+// ============================================================
+
+class Process {
+  constructor(pid, name, entryPoint, stackPtr) {
+    this.pid = pid;
+    this.name = name;
+    this.state = 'ready'; // ready, running, blocked, terminated
+    this.regs = new Uint32Array(32);
+    this.regs[0] = 0;
+    this.pc = entryPoint;
+    this.sp = stackPtr;
+    this.regs[2] = stackPtr; // sp
+    this.breakpoints = new Set();
+    this.priority = 0;
+    this.cyclesUsed = 0;
+    this.exitCode = 0;
+  }
+}
+
+class Kernel {
+  constructor(cpu, memory, uart) {
+    this.cpu = cpu;
+    this.mem = memory;
+    this.uart = uart;
+    this.processes = [];
+    this.currentPID = -1;
+    this.nextPID = 1;
+    this.quantum = 100; // cycles per time slice
+    this.quantumCounter = 0;
+    this.idleProcess = null;
+    this.running = false;
+    this.outputBuffer = '';
+    this.onOutput = null;
+    this.onProcessChange = null;
+  }
+
+  createProcess(name, entryPoint, stackPtr) {
+    const pid = this.nextPID++;
+    const proc = new Process(pid, name, entryPoint, stackPtr || 0x8000 - pid * 4096);
+    this.processes.push(proc);
+    if (this.onProcessChange) this.onProcessChange();
+    return pid;
+  }
+
+  loadDemoProgram(name) {
+    const asm = new Assembler();
+    let source = '';
+    let entry = 0x200;
+
+    switch (name) {
+      case 'fibonacci':
+        source = `
+          # Fibonacci: print first 20 numbers
+          li a0, 0          # a0 = n (counter)
+          li a1, 20         # a1 = max
+          li s0, 0          # s0 = fib(n-2)
+          li s1, 1          # s1 = fib(n-1)
+          li s2, 0x10000000 # UART base
+        loop:
+          # Print current number (s0)
+          mv a2, s0
+          call print_num
+          # Print newline
+          li a3, 10
+          sb a3, 0(s2)
+          # Next fibonacci
+          add s2, s0, s1    # s2 = fib(n-2) + fib(n-1)
+          mv s0, s1
+          mv s1, s2
+          addi a0, a0, 1
+          blt a0, a1, loop
+          # Print done
+          li a3, 68         # 'D'
+          sb a3, 0(s2)
+          li a3, 10
+          sb a3, 0(s2)
+          ecall             # exit
+        print_num:
+          # Print unsigned int in a2 to UART
+          li t0, 10
+          addi sp, sp, -16
+          sw ra, 12(sp)
+          sw s0, 8(sp)
+          mv s0, a2
+          li a2, 0x10000000
+          li t1, 0          # digit count
+        pn_loop:
+          remu t2, s0, t0
+          addi t2, t2, 48   # '0'
+          addi sp, sp, -4
+          sw t2, 0(sp)
+          addi t1, t1, 1
+          divu s0, s0, t0
+          bnez s0, pn_loop
+        pn_print:
+          lw t2, 0(sp)
+          addi sp, sp, 4
+          sb t2, 0(a2)
+          addi t1, t1, -1
+          bnez t1, pn_print
+          lw s0, 8(sp)
+          lw ra, 12(sp)
+          addi sp, sp, 16
+          jr ra
+        `;
+        break;
+
+      case 'primes':
+        source = `
+          # Sieve of Eratosthenes: print primes up to 100
+          li a0, 0x10000000  # UART base
+          li a1, 200         # sieve size
+          addi sp, sp, -200  # allocate sieve on stack
+          mv a2, sp          # a2 = sieve pointer
+          # Initialize all to 1 (prime)
+          li t0, 0
+          li t1, 1
+        init_loop:
+          sb t1, 0(a2)
+          addi a2, a2, 1
+          addi t0, t0, 1
+          blt t0, a1, init_loop
+          # Sieve
+          li t0, 2
+          mv a2, sp
+        sieve_outer:
+          mul t1, t0, t0
+          bge t1, a1, sieve_done
+          add a3, a2, t0
+          lb t2, 0(a3)
+          beqz t2, sieve_next
+          mv t3, t1
+        sieve_inner:
+          add a4, a2, t3
+          sb zero, 0(a4)
+          add t3, t3, t0
+          blt t3, a1, sieve_inner
+        sieve_next:
+          addi t0, t0, 1
+          j sieve_outer
+        sieve_done:
+          # Print primes
+          li t0, 2
+          mv a2, sp
+        print_loop:
+          add a3, a2, t0
+          lb t1, 0(a3)
+          beqz t1, skip_prime
+          mv a2, t0
+          call print_num
+          li a3, 32
+          sb a3, 0(a0)
+          mv a2, sp
+        skip_prime:
+          addi t0, t0, 1
+          blt t0, a1, print_loop
+          li a3, 10
+          sb a3, 0(a0)
+          ecall
+        print_num:
+          li t1, 10
+          addi sp, sp, -16
+          sw ra, 12(sp)
+          sw s0, 8(sp)
+          mv s0, a2
+          li a2, 0x10000000
+          li t2, 0
+        pn_loop:
+          remu t3, s0, t1
+          addi t3, t3, 48
+          addi sp, sp, -4
+          sw t3, 0(sp)
+          addi t2, t2, 1
+          divu s0, s0, t1
+          bnez s0, pn_loop
+        pn_print:
+          lw t3, 0(sp)
+          addi sp, sp, 4
+          sb t3, 0(a2)
+          addi t2, t2, -1
+          bnez t2, pn_print
+          lw s0, 8(sp)
+          lw ra, 12(sp)
+          addi sp, sp, 16
+          jr ra
+        `;
+        break;
+
+      case 'echo':
+        source = `
+          # Echo: read chars from UART, echo back
+          li a0, 0x10000000
+        loop:
+          # Wait for RX ready
+          lb a1, 5(a0)
+          andi a1, a1, 1
+          beqz a1, loop
+          # Read char
+          lb a1, 0(a0)
+          # Echo back
+          sb a1, 0(a0)
+          # Check for newline
+          li a2, 10
+          bne a1, a2, loop
+          ecall
+        `;
+        break;
+
+      case 'shell':
+        source = `
+          # Simple shell: prompt, read line, echo
+          li a0, 0x10000000
+          # Print prompt
+          li a1, 62         # '>'
+          sb a1, 0(a0)
+          li a1, 32         # ' '
+          sb a1, 0(a0)
+        read_loop:
+          lb a1, 5(a0)
+          andi a1, a1, 1
+          beqz a1, read_loop
+          lb a1, 0(a0)
+          sb a1, 0(a0)
+          li a2, 13
+          bne a1, a2, read_loop
+          li a1, 10
+          sb a1, 0(a0)
+          j shell
+        `;
+        break;
+
+      case 'counter':
+        source = `
+          # Simple counter: count 1-10
+          li a0, 0x10000000
+          li t0, 1
+        loop:
+          mv a2, t0
+          call print_num
+          li a3, 10
+          sb a3, 0(a0)
+          addi t0, t0, 1
+          li a3, 10
+          blt t0, a3, loop
+          ecall
+        print_num:
+          li t1, 10
+          addi sp, sp, -16
+          sw ra, 12(sp)
+          sw s0, 8(sp)
+          mv s0, a2
+          li a2, 0x10000000
+          li t2, 0
+        pn_loop:
+          remu t3, s0, t1
+          addi t3, t3, 48
+          addi sp, sp, -4
+          sw t3, 0(sp)
+          addi t2, t2, 1
+          divu s0, s0, t1
+          bnez s0, pn_loop
+        pn_print:
+          lw t3, 0(sp)
+          addi sp, sp, 4
+          sb t3, 0(a2)
+          addi t2, t2, -1
+          bnez t2, pn_print
+          lw s0, 8(sp)
+          lw ra, 12(sp)
+          addi sp, sp, 16
+          jr ra
+        `;
+        break;
+
+      default:
+        return null;
+    }
+
+    const binary = asm.assemble(source);
+    const bytes = new Uint8Array(binary.buffer);
+    this.mem.loadBinary(bytes, entry);
+    return entry;
+  }
+
+  handleSyscall(cpu) {
+    const syscall = cpu.regs[17]; // a7
+    const a0 = cpu.regs[10];
+    const a1 = cpu.regs[11];
+    const a2 = cpu.regs[12];
+
+    switch (syscall) {
+      case 1: // write
+        // a0 = fd, a1 = buf ptr, a2 = len
+        if (a0 === 1) { // stdout
+          for (let i = 0; i < a2; i++) {
+            const ch = this.mem.read8(a1 + i);
+            this.outputBuffer += String.fromCharCode(ch);
+          }
+          if (this.onOutput) this.onOutput(this.outputBuffer);
+        }
+        cpu.regs[10] = a2; // return bytes written
+        break;
+
+      case 2: // read
+        // a0 = fd, a1 = buf ptr, a2 = len
+        if (a0 === 0) { // stdin
+          let count = 0;
+          for (let i = 0; i < a2 && this.uart.rxBuffer.length > 0; i++) {
+            const ch = this.uart.rxBuffer.charCodeAt(0);
+            this.uart.rxBuffer = this.uart.rxBuffer.slice(1);
+            this.mem.write8(a1 + i, ch);
+            count++;
+          }
+          cpu.regs[10] = count;
+        }
+        break;
+
+      case 3: // exit
+        {
+          const proc = this.getCurrentProcess();
+          if (proc) {
+            proc.state = 'terminated';
+            proc.exitCode = a0;
+          }
+          cpu.halted = true;
+          if (this.onProcessChange) this.onProcessChange();
+        }
+        break;
+
+      case 4: // getpid
+        {
+          const proc = this.getCurrentProcess();
+          cpu.regs[10] = proc ? proc.pid : 0;
+        }
+        break;
+
+      case 5: // sbrk (allocate memory)
+        {
+          // Simple bump allocator
+          const heapTop = 0x4000;
+          const heapSize = 0x4000;
+          const alloc = heapTop + (this._heapOffset || 0);
+          this._heapOffset = (this._heapOffset || 0) + a0;
+          cpu.regs[10] = alloc;
+        }
+        break;
+
+      default:
+        cpu.regs[10] = -1; // unsupported syscall
+    }
+  }
+
+  getCurrentProcess() {
+    return this.processes.find(p => p.pid === this.currentPID);
+  }
+
+  schedule() {
+    const ready = this.processes.filter(p => p.state === 'ready');
+    if (ready.length === 0) return null;
+
+    // Round-robin: pick next after current
+    let idx = 0;
+    if (this.currentPID >= 0) {
+      const curIdx = ready.findIndex(p => p.pid === this.currentPID);
+      if (curIdx >= 0) idx = (curIdx + 1) % ready.length;
+    }
+    return ready[idx];
+  }
+
+  tick() {
+    if (!this.running) return;
+
+    this.quantumCounter++;
+    if (this.quantumCounter >= this.quantum) {
+      this.quantumCounter = 0;
+      const next = this.schedule();
+      if (next) {
+        this.switchTo(next);
+      }
+    }
+
+    // Step the CPU
+    const proc = this.getCurrentProcess();
+    if (!proc || proc.state !== 'running') {
+      const next = this.schedule();
+      if (next) {
+        this.switchTo(next);
+      } else {
+        return;
+      }
+    }
+
+    const result = this.cpu.step();
+
+    // Handle traps (syscalls)
+    if (this.cpu.trap) {
+      if (this.cpu.trapCause === 11) { // ECALL
+        this.cpu.trap = false;
+        this.handleSyscall(this.cpu);
+        this.cpu.pc += 4; // skip ecall
+      } else {
+        // Other trap: terminate process
+        const p = this.getCurrentProcess();
+        if (p) {
+          p.state = 'terminated';
+          if (this.onProcessChange) this.onProcessChange();
+        }
+        this.cpu.trap = false;
+        this.cpu.halted = false;
+      }
+    }
+
+    if (proc) proc.cyclesUsed++;
+  }
+
+  switchTo(proc) {
+    // Save current process state
+    const current = this.getCurrentProcess();
+    if (current) {
+      current.regs.set(this.cpu.regs);
+      current.pc = this.cpu.pc;
+      current.state = 'ready';
+    }
+
+    // Load new process state
+    this.currentPID = proc.pid;
+    proc.state = 'running';
+    this.cpu.regs.set(proc.regs);
+    this.cpu.pc = proc.pc;
+    this.cpu.halted = false;
+    this.cpu.trap = false;
+
+    if (this.onProcessChange) this.onProcessChange();
+  }
+
+  start() {
+    this.running = true;
+    const next = this.schedule();
+    if (next) this.switchTo(next);
+  }
+
+  stop() {
+    this.running = false;
+  }
+
+  runProgram(name) {
+    const entry = this.loadDemoProgram(name);
+    if (entry === null) return false;
+    const pid = this.createProcess(name, entry);
+    if (!this.running) this.start();
+    return pid;
+  }
+
+  getProcessList() {
+    return this.processes.map(p => ({
+      pid: p.pid,
+      name: p.name,
+      state: p.state,
+      pc: p.pc,
+      cycles: p.cyclesUsed,
+      exitCode: p.exitCode
+    }));
+  }
+}
+
+// ============================================================
+// VM Controller
+// ============================================================
+const VM = {
+  mem: null,
+  cpu: null,
+  uart: null,
+  kernel: null,
+  term: null,
+  running: false,
+  timerId: null,
+  speed: 1000, // cycles per tick
+  tickCount: 0,
+
+  init() {
+    this.mem = new Memory(65536);
+    this.uart = new UART();
+    this.mem.mapMMIO(0x10000000, this.uart);
+    this.cpu = new RISCVCPU(this.mem);
+    this.kernel = new Kernel(this.cpu, this.mem, this.uart);
+    
+    // Wire up UART output to terminal
+    this.uart.onData = (ch) => {
+      if (this.term) {
+        this.term.write(String.fromCharCode(ch));
+      }
+    };
+
+    // Wire up kernel output
+    this.kernel.onOutput = (buf) => {
+      // Output is already sent via UART
+    };
+
+    this.kernel.onProcessChange = () => {
+      this.updateUI();
+    };
+
+    // Set up CPU trap handler
+    this.cpu.onTrap = (cause, val) => {
+      log(`Trap: cause=${cause}, value=0x${val.toString(16)}`, 'error');
+    };
+
+    this.cpu.onBreakpoint = (pc) => {
+      log(`Breakpoint hit at 0x${pc.toString(16)}`, 'info');
+      this.pause();
+    };
+
+    // Init terminal
+    this.initTerminal();
+    this.updateUI();
+    log('RISC-V VM / OS Simulator initialized', 'info');
+    log('64KB RAM | 32-bit RV32I CPU | UART @ 0x10000000', 'info');
+    log('Select a program and click Load, then Run', 'info');
+    
+    // Load default assembly source
+    this.loadAssemblySource('fibonacci');
+  },
+
+  initTerminal() {
+    const termEl = document.getElementById('terminal');
+    termEl.innerHTML = '';
+    this.term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontSize: 13,
+      fontFamily: "'SF Mono', 'Fira Code', monospace",
+      theme: {
+        background: '#0d1117',
+        foreground: '#c9d1d9',
+        cursor: '#58a6ff',
+        selection: '#264f78',
+        black: '#484f58',
+        red: '#f85149',
+        green: '#3fb950',
+        yellow: '#d29922',
+        blue: '#58a6ff',
+        magenta: '#bc8cff',
+        cyan: '#39c5cf',
+        white: '#c9d1d9',
+        brightBlack: '#6e7681',
+        brightRed: '#ff7b72',
+        brightGreen: '#3fb950',
+        brightYellow: '#d29922',
+        brightBlue: '#58a6ff',
+        brightMagenta: '#bc8cff',
+        brightCyan: '#39c5cf',
+        brightWhite: '#f0f6fc'
+      }
+    });
+    this.term.open(termEl);
+    this.term.onData((data) => {
+      // Send keystrokes to UART for echo/shell programs
+      for (let i = 0; i < data.length; i++) {
+        this.uart.write(data[i]);
+      }
+    });
+    this.term.write('\x1b[36mRISC-V VM/OS Simulator v1.0\x1b[0m\r\n');
+    this.term.write('\x1b[90mType in terminal to send keystrokes to VM\x1b[0m\r\n');
+    this.term.write('----------------------------------------\r\n');
+  },
+
+  loadAssemblySource(name) {
+    const sources = {
+      fibonacci: `# Fibonacci: print first 20 numbers
+# Uses UART at 0x10000000 for output
+# Demonstrates: loops, function calls, stack usage
+
+li a0, 0          # counter
+li a1, 20         # max
+li s0, 0          # fib(n-2)
+li s1, 1          # fib(n-1)
+li s2, 0x10000000 # UART base
+
+loop:
+  mv a2, s0
+  call print_num
+  li a3, 10
+  sb a3, 0(s2)    # newline
+  add s2, s0, s1
+  mv s0, s1
+  mv s1, s2
+  addi a0, a0, 1
+  blt a0, a1, loop
+  ecall           # exit
+
+print_num:
+  li t0, 10
+  addi sp, sp, -16
+  sw ra, 12(sp)
+  sw s0, 8(sp)
+  mv s0, a2
+  li a2, 0x10000000
+  li t1, 0
+pn_loop:
+  remu t2, s0, t0
+  addi t2, t2, 48
+  addi sp, sp, -4
+  sw t2, 0(sp)
+  addi t1, t1, 1
+  divu s0, s0, t0
+  bnez s0, pn_loop
+pn_print:
+  lw t2, 0(sp)
+  addi sp, sp, 4
+  sb t2, 0(a2)
+  addi t1, t1, -1
+  bnez t1, pn_print
+  lw s0, 8(sp)
+  lw ra, 12(sp)
+  addi sp, sp, 16
+  jr ra`,
+      primes: `# Sieve of Eratosthenes: primes up to 100
+li a0, 0x10000000
+li a1, 200
+addi sp, sp, -200
+mv a2, sp
+li t0, 0
+li t1, 1
+init_loop:
+  sb t1, 0(a2)
+  addi a2, a2, 1
+  addi t0, t0, 1
+  blt t0, a1, init_loop
+li t0, 2
+mv a2, sp
+sieve_outer:
+  mul t1, t0, t0
+  bge t1, a1, sieve_done
+  add a3, a2, t0
+  lb t2, 0(a3)
+  beqz t2, sieve_next
+  mv t3, t1
+sieve_inner:
+  add a4, a2, t3
+  sb zero, 0(a4)
+  add t3, t3, t0
+  blt t3, a1, sieve_inner
+sieve_next:
+  addi t0, t0, 1
+  j sieve_outer
+sieve_done:
+  li t0, 2
+  mv a2, sp
+print_loop:
+  add a3, a2, t0
+  lb t1, 0(a3)
+  beqz t1, skip_prime
+  mv a2, t0
+  call print_num
+  li a3, 32
+  sb a3, 0(a0)
+  mv a2, sp
+skip_prime:
+  addi t0, t0, 1
+  blt t0, a1, print_loop
+  li a3, 10
+  sb a3, 0(a0)
+  ecall
+print_num:
+  li t1, 10
+  addi sp, sp, -16
+  sw ra, 12(sp)
+  sw s0, 8(sp)
+  mv s0, a2
+  li a2, 0x10000000
+  li t2, 0
+pn_loop:
+  remu t3, s0, t1
+  addi t3, t3, 48
+  addi sp, sp, -4
+  sw t3, 0(sp)
+  addi t2, t2, 1
+  divu s0, s0, t1
+  bnez s0, pn_loop
+pn_print:
+  lw t3, 0(sp)
+  addi sp, sp, 4
+  sb t3, 0(a2)
+  addi t2, t2, -1
+  bnez t2, pn_print
+  lw s0, 8(sp)
+  lw ra, 12(sp)
+  addi sp, sp, 16
+  jr ra`,
+      counter: `# Counter: print 1-10
+li a0, 0x10000000
+li t0, 1
+loop:
+  mv a2, t0
+  call print_num
+  li a3, 10
+  sb a3, 0(a0)
+  addi t0, t0, 1
+  li a3, 10
+  blt t0, a3, loop
+  ecall
+print_num:
+  li t1, 10
+  addi sp, sp, -16
+  sw ra, 12(sp)
+  sw s0, 8(sp)
+  mv s0, a2
+  li a2, 0x10000000
+  li t2, 0
+pn_loop:
+  remu t3, s0, t1
+  addi t3, t3, 48
+  addi sp, sp, -4
+  sw t3, 0(sp)
+  addi t2, t2, 1
+  divu s0, s0, t1
+  bnez s0, pn_loop
+pn_print:
+  lw t3, 0(sp)
+  addi sp, sp, 4
+  sb t3, 0(a2)
+  addi t2, t2, -1
+  bnez t2, pn_print
+  lw s0, 8(sp)
+  lw ra, 12(sp)
+  addi sp, sp, 16
+  jr ra`,
+      echo: `# Echo: read from UART, write back
+li a0, 0x10000000
+loop:
+  lb a1, 5(a0)
+  andi a1, a1, 1
+  beqz a1, loop
+  lb a1, 0(a0)
+  sb a1, 0(a0)
+  li a2, 10
+  bne a1, a2, loop
+  ecall`,
+      shell: `# Simple shell: prompt, read, echo
+li a0, 0x10000000
+li a1, 62
+sb a1, 0(a0)
+li a1, 32
+sb a1, 0(a0)
+read_loop:
+  lb a1, 5(a0)
+  andi a1, a1, 1
+  beqz a1, read_loop
+  lb a1, 0(a0)
+  sb a1, 0(a0)
+  li a2, 13
+  bne a1, a2, read_loop
+  li a1, 10
+  sb a1, 0(a0)
+  j shell`
+    };
+    document.getElementById('asm-editor').value = sources[name] || '';
+  },
+
+  loadProgram() {
+    const sel = document.getElementById('program-select').value;
+    this.reset();
+    this.loadAssemblySource(sel);
+    const entry = this.kernel.loadDemoProgram(sel);
+    if (entry !== null) {
+      const pid = this.kernel.createProcess(sel, entry);
+      log(`Loaded "${sel}" at 0x${entry.toString(16)}, PID=${pid}`, 'success');
+      this.updateUI();
+      this.refreshMem();
+    } else {
+      log(`Failed to load "${sel}"`, 'error');
+    }
+  },
+
+  start() {
+    if (this.running) return;
+    if (this.kernel.processes.length === 0) {
+      log('No programs loaded. Select and Load first.', 'error');
+      return;
+    }
+    this.running = true;
+    this.kernel.start();
+    this.setStatus('running');
+    log('VM running...', 'info');
+    this.tick();
+  },
+
+  pause() {
+    this.running = false;
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    this.kernel.stop();
+    this.setStatus('stopped');
+    log('VM paused', 'info');
+    this.updateUI();
+  },
+
+  step() {
+    if (this.kernel.processes.length === 0) {
+      log('No programs loaded.', 'error');
+      return;
+    }
+    this.kernel.running = true;
+    this.kernel.tick();
+    this.kernel.running = false;
+    this.updateUI();
+    this.refreshMem();
+  },
+
+  reset() {
+    this.pause();
+    this.mem = new Memory(65536);
+    this.uart = new UART();
+    this.mem.mapMMIO(0x10000000, this.uart);
+    this.uart.onData = (ch) => {
+      if (this.term) this.term.write(String.fromCharCode(ch));
+    };
+    this.cpu = new RISCVCPU(this.mem);
+    this.kernel = new Kernel(this.cpu, this.mem, this.uart);
+    this.kernel.onProcessChange = () => this.updateUI();
+    this.kernel.onOutput = () => {};
+    this.cpu.onTrap = (cause, val) => {
+      log(`Trap: cause=${cause}, value=0x${val.toString(16)}`, 'error');
+    };
+    this.cpu.onBreakpoint = (pc) => {
+      log(`Breakpoint at 0x${pc.toString(16)}`, 'info');
+      this.pause();
+    };
+    this.tickCount = 0;
+    this.setStatus('stopped');
+    this.updateUI();
+    this.refreshMem();
+    log('VM reset', 'info');
+  },
+
+  tick() {
+    if (!this.running) return;
+    
+    // Run a batch of cycles
+    const cyclesPerTick = this.speed;
+    for (let i = 0; i < cyclesPerTick; i++) {
+      this.kernel.tick();
+      this.tickCount++;
+      if (this.cpu.halted) {
+        this.running = false;
+        this.setStatus('halted');
+        log(`Program terminated after ${this.tickCount} cycles`, 'info');
+        this.updateUI();
+        return;
+      }
+    }
+    
+    this.updateUI();
+    
+    this.timerId = setTimeout(() => this.tick(), 16); // ~60fps
+  },
+
+  setStatus(state) {
+    const bar = document.getElementById('status-bar');
+    const dot = bar.querySelector('.dot');
+    dot.className = 'dot ' + state;
+    bar.childNodes[1].textContent = state.charAt(0).toUpperCase() + state.slice(1);
+  },
+
+  updateUI() {
+    // Registers
+    const regNames = ['zero','ra','sp','gp','tp','t0','t1','t2','s0/fp','s1','a0','a1','a2','a3','a4','a5',
+                      'a6','a7','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11','t3','t4','t5','t6'];
+    const regGrid = document.getElementById('reg-display');
+    regGrid.innerHTML = '';
+    for (let i = 0; i < 32; i++) {
+      const el = document.createElement('div');
+      el.className = 'reg-item';
+      el.innerHTML = `<span class="name">${regNames[i]}</span> <span class="value">0x${this.cpu.regs[i].toString(16).padStart(8,'0')}</span>`;
+      regGrid.appendChild(el);
+    }
+    document.getElementById('pc-display').textContent = `0x${this.cpu.pc.toString(16).padStart(8,'0')}`;
+    document.getElementById('cycle-display').textContent = this.tickCount;
+
+    // Processes
+    const procDiv = document.getElementById('proc-display');
+    procDiv.innerHTML = '';
+    const procs = this.kernel.getProcessList();
+    if (procs.length === 0) {
+      procDiv.innerHTML = '<div style="color:#8b949e">No processes</div>';
+    } else {
+      for (const p of procs) {
+        const el = document.createElement('div');
+        el.className = 'proc-item';
+        el.innerHTML = `<span class="name">${p.name}</span> PID=${p.pid} <span class="state ${p.state}">${p.state}</span><br>` +
+          `<span style="color:#8b949e">PC=0x${p.pc.toString(16).padStart(8,'0')} Cycles=${p.cycles}</span>` +
+          (p.state === 'terminated' ? ` Exit=${p.exitCode}` : '');
+        procDiv.appendChild(el);
+      }
+    }
+  },
+
+  refreshMem() {
+    const addrInput = document.getElementById('mem-addr');
+    const lenInput = document.getElementById('mem-len');
+    let addr = parseInt(addrInput.value, 16);
+    if (isNaN(addr)) addr = 0;
+    let len = parseInt(lenInput.value);
+    if (isNaN(len) || len < 16) len = 128;
+    if (len > 1024) len = 1024;
+    
+    const dump = this.mem.hexDump(addr, len);
+    document.getElementById('mem-display').textContent = dump;
+  }
+};
+
+// ============================================================
+// UI Helpers
+// ============================================================
+function log(msg, type = 'info') {
+  const el = document.getElementById('output-log');
+  const div = document.createElement('div');
+  div.className = type;
+  div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function switchSidebar(tab, btn) {
+  document.querySelectorAll('.sidebar-tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['regs','mem','procs'].forEach(t => {
+    document.getElementById(`sidebar-${t}`).style.display = t === tab ? 'block' : 'none';
+  });
+  if (tab === 'mem') VM.refreshMem();
+}
+
+function switchBottom(tab, btn) {
+  document.querySelectorAll('.bottom-tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['asm','output'].forEach(t => {
+    document.getElementById(`bottom-${t}`).style.display = t === tab ? 'block' : 'none';
+  });
+}
+
+function vmStart() { VM.start(); }
+function vmPause() { VM.pause(); }
+function vmStep() { VM.step(); }
+function vmReset() { VM.reset(); }
+function vmLoadProgram() { VM.loadProgram(); }
+function refreshMem() { VM.refreshMem(); }
+
+// ============================================================
+// Init on load
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  VM.init();
+});
+</script>
+</body>
+</html>

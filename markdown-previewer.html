@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Markdown Previewer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-dark.min.css">
+<style>
+  :root { --bg: #1e1e2e; --surface: #181825; --surface2: #313244; --text: #cdd6f4; --subtext: #6c7086; --mauve: #cba6f7; --border: #313244; --radius: 6px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { background: var(--surface); padding: 8px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  header h1 { font-size: 16px; font-weight: 600; color: var(--mauve); }
+  .spacer { flex: 1; }
+  .btn { background: var(--surface2); border: none; color: var(--text); padding: 5px 12px; border-radius: var(--radius); cursor: pointer; font-size: 12px; transition: 0.15s; }
+  .btn:hover { background: #45475a; }
+  .btn.primary { background: var(--mauve); color: #1e1e2e; font-weight: 600; }
+  .btn.primary:hover { background: #b4b0e0; }
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .panel + .panel { border-left: 2px solid var(--border); }
+  .panel-header { background: var(--surface); padding: 6px 12px; font-size: 11px; color: var(--subtext); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  .panel-header .count { font-size: 10px; color: var(--subtext); background: var(--surface2); padding: 1px 6px; border-radius: 8px; }
+  textarea { flex: 1; background: var(--bg); color: var(--text); border: none; outline: none; padding: 16px; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 14px; line-height: 1.6; resize: none; tab-size: 2; }
+  textarea::placeholder { color: var(--subtext); opacity: 0.5; }
+  #preview { flex: 1; overflow-y: auto; padding: 16px; }
+  .markdown-body { background: transparent !important; color: var(--text) !important; max-width: 100%; }
+  .markdown-body pre { background: var(--surface) !important; border-radius: var(--radius); }
+  .markdown-body code { background: var(--surface2) !important; }
+  .markdown-body table tr { background: var(--surface) !important; }
+  .markdown-body table tr:nth-child(2n) { background: var(--bg) !important; }
+  .status-bar { background: var(--surface); padding: 4px 12px; font-size: 11px; color: var(--subtext); border-top: 1px solid var(--border); display: flex; gap: 16px; flex-shrink: 0; }
+  .toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: var(--surface2); color: var(--text); padding: 8px 20px; border-radius: var(--radius); font-size: 13px; opacity: 0; transition: 0.3s; pointer-events: none; z-index: 100; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 768px) { .main { flex-direction: column; } .panel + .panel { border-left: none; border-top: 2px solid var(--border); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📝 Markdown Previewer</h1>
+  <span class="sub" style="font-size:11px;color:var(--subtext)">Live preview</span>
+  <div class="spacer"></div>
+  <button class="btn" onclick="loadSample()">📄 Sample</button>
+  <button class="btn" onclick="clearAll()">🗑 Clear</button>
+  <button class="btn primary" onclick="copyHTML()">📋 Copy HTML</button>
+</header>
+
+<div class="main">
+  <div class="panel">
+    <div class="panel-header">
+      Markdown <span class="count" id="wordCount">0 words</span>
+    </div>
+    <textarea id="editor" placeholder="Type Markdown here..."></textarea>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Preview</div>
+    <div id="preview" class="markdown-body"></div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <span id="lineCount">Lines: 0</span>
+  <span id="charCount">Chars: 0</span>
+  <span id="saveStatus">Auto-saving...</span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+// Configure marked
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+const editor = document.getElementById('editor');
+const preview = document.getElementById('preview');
+const wordCount = document.getElementById('wordCount');
+const lineCount = document.getElementById('lineCount');
+const charCount = document.getElementById('charCount');
+const saveStatus = document.getElementById('saveStatus');
+const toast = document.getElementById('toast');
+
+let saveTimeout = null;
+
+// Render markdown to HTML
+function render() {
+  const text = editor.value;
+  const html = marked.parse(text || '');
+  preview.innerHTML = html;
+
+  // Stats
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  wordCount.textContent = words + ' word' + (words !== 1 ? 's' : '');
+  lineCount.textContent = 'Lines: ' + text.split('\n').length;
+  charCount.textContent = 'Chars: ' + text.length;
+
+  // Auto-save
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    localStorage.setItem('mdPreviewer', text);
+    saveStatus.textContent = 'Saved ✓';
+    setTimeout(() => { saveStatus.textContent = 'Auto-saving...'; }, 2000);
+  }, 500);
+}
+
+// Load from localStorage
+const saved = localStorage.getItem('mdPreviewer');
+if (saved) {
+  editor.value = saved;
+  render();
+}
+
+editor.addEventListener('input', render);
+
+// Keyboard shortcuts
+editor.addEventListener('keydown', (e) => {
+  // Tab = 2 spaces
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    editor.value = editor.value.substring(0, start) + '  ' + editor.value.substring(end);
+    editor.selectionStart = editor.selectionEnd = start + 2;
+    render();
+  }
+  // Cmd+B = bold
+  if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+    e.preventDefault();
+    wrapSelection('**', '**');
+  }
+  // Cmd+I = italic
+  if ((e.metaKey || e.ctrlKey) && e.key === 'i') {
+    e.preventDefault();
+    wrapSelection('*', '*');
+  }
+  // Cmd+K = link
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    wrapSelection('[', '](url)');
+  }
+});
+
+function wrapSelection(before, after) {
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const selected = editor.value.substring(start, end);
+  editor.value = editor.value.substring(0, start) + before + selected + after + editor.value.substring(end);
+  editor.selectionStart = start + before.length;
+  editor.selectionEnd = start + before.length + selected.length;
+  render();
+}
+
+// Sample markdown
+function loadSample() {
+  editor.value = `# Welcome to Markdown Previewer 🎉
+
+## Typography
+
+**Bold text**, *italic text*, ~~strikethrough~~, and \`inline code\`.
+
+## Lists
+
+1. First item
+2. Second item
+3. Third item
+
+- Bullet point
+- Another bullet
+  - Nested bullet
+
+## Code Blocks
+
+\`\`\`javascript
+function greet(name) {
+  return \`Hello, \${name}! 👋\`;
+}
+console.log(greet('World'));
+\`\`\`
+
+## Tables
+
+| Feature | Status |
+|---------|--------|
+| Headers | ✅ |
+| Bold/Italic | ✅ |
+| Code Blocks | ✅ |
+| Tables | ✅ |
+
+## Blockquotes
+
+> The best way to predict the future is to invent it.
+> — Alan Kay
+
+## Links & Images
+
+[GitHub](https://github.com)
+
+---
+
+*Start typing or edit this sample!*
+`;
+  render();
+  showToast('Sample loaded ✓');
+}
+
+function clearAll() {
+  if (editor.value && !confirm('Clear all content?')) return;
+  editor.value = '';
+  render();
+  localStorage.removeItem('mdPreviewer');
+  showToast('Cleared ✓');
+}
+
+function copyHTML() {
+  const html = preview.innerHTML;
+  navigator.clipboard.writeText(html).then(() => {
+    showToast('HTML copied to clipboard ✓');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = html;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('HTML copied ✓');
+  });
+}
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toast._hide);
+  toast._hide = setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+// Cmd+S to save
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    e.preventDefault();
+    localStorage.setItem('mdPreviewer', editor.value);
+    showToast('Saved ✓');
+  }
+});
+</script>
+</body>
+</html>
